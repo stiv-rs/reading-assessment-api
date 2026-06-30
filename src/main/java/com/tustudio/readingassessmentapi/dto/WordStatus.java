@@ -1,4 +1,7 @@
 package com.tustudio.readingassessmentapi.dto;
 
-public record WordStatus() {
+public enum WordStatus {
+    CORRECT,
+    OMITTED,
+    MISREAD
 }

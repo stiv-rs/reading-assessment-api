@@ -1,4 +1,8 @@
 package com.tustudio.readingassessmentapi.dto;
 
-public record AssessmentResponse() {
-}
+import java.util.List;
+
+public record AssessmentResponse(
+        double accuracyScore,
+        List<AnalyzedWord> analyzedWords
+) {}
