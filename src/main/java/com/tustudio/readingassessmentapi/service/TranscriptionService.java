@@ -1,23 +1,26 @@
 package com.tustudio.readingassessmentapi.service;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 
 @Service
-public class TranscriptionService{
+public class TranscriptionService {
 
-    @Value("${openai.api-url}")
+    @Value("${gemini.api-url}")
     private String apiUrl;
 
-    @Value("${openai.api-key}")
+    @Value("${gemini.api-key}")
     private String apiKey;
 
     private final RestTemplate restTemplate;
@@ -27,41 +30,39 @@ public class TranscriptionService{
     }
 
     public String transcribeAudio(MultipartFile audioFile) throws IOException {
+        String base64Audio = Base64.getEncoder().encodeToString(audioFile.getBytes());
+        String mimeType = audioFile.getContentType() != null ? audioFile.getContentType() : "audio/webm";
+
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-        headers.setBearerAuth(apiKey);
+        headers.setContentType(MediaType.APPLICATION_JSON);
 
-        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-
-        // Convertimos el MultipartFile de Spring a un Resource con nombre de archivo
-        ByteArrayResource audioResource = new ByteArrayResource(audioFile.getBytes()) {
-            @Override
-            public String getFilename() {
-                // OpenAI exige que el archivo tenga un nombre con extensión válida
-                return audioFile.getOriginalFilename() != null ? audioFile.getOriginalFilename() : "audio.webm";
-            }
-        };
-
-        body.add("file", audioResource);
-        body.add("model", "whisper-1");
-        body.add("language", "en"); // Forzamos inglés para el reto de lectura
-
-        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-
-        // Hacemos la petición POST a OpenAI
-        ResponseEntity<WhisperResponse> response = restTemplate.postForEntity(
-                apiUrl,
-                requestEntity,
-                WhisperResponse.class
+        // Estructura oficial para la API de Gemini
+        Map<String, Object> body = Map.of(
+                "contents", List.of(
+                        Map.of("parts", List.of(
+                                Map.of("text", "Transcribe the following audio accurately."),
+                                Map.of("inline_data", Map.of(
+                                        "mime_type", mimeType,
+                                        "data", base64Audio
+                                ))
+                        ))
+                )
         );
 
+        HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+        String fullUrl = apiUrl + apiKey;
+
+        // Usamos el modelo directamente en la URL si es necesario,
+        // pero intentemos primero esta estructura limpia
+        ResponseEntity<Map> response = restTemplate.postForEntity(fullUrl, requestEntity, Map.class);
+
         if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-            return response.getBody().text();
+            Map<String, Object> bodyRes = response.getBody();
+            List<Map<String, Object>> candidates = (List<Map<String, Object>>) bodyRes.get("candidates");
+            Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
+            List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
+            return (String) parts.get(0).get("text");
         }
-
-        throw new RuntimeException("Fallo al comunicarse con la API de OpenAI: " + response.getStatusCode());
+        throw new RuntimeException("Fallo en la API de Gemini: " + response.getStatusCode());
     }
-
-    // Usamos un Record interno para mapear la respuesta JSON de OpenAI de forma limpia
-    private record WhisperResponse(String text) {}
 }
